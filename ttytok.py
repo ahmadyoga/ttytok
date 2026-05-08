@@ -38,6 +38,7 @@ class ADBShell:
     """Persistent adb shell — one process, no spawn overhead per keypress."""
 
     def __init__(self):
+        self._lock = threading.Lock()
         self.proc = subprocess.Popen(
             ['adb', 'shell'],
             stdin=subprocess.PIPE,
@@ -46,11 +47,12 @@ class ADBShell:
         )
 
     def send(self, cmd: str):
-        try:
-            self.proc.stdin.write((cmd + '\n').encode())
-            self.proc.stdin.flush()
-        except BrokenPipeError:
-            raise RuntimeError("ADB shell died — device disconnected?")
+        with self._lock:
+            try:
+                self.proc.stdin.write((cmd + '\n').encode())
+                self.proc.stdin.flush()
+            except BrokenPipeError:
+                raise RuntimeError("ADB shell died — device disconnected?")
 
     def keyevent(self, code: int):
         self.send(f'input keyevent {code}')
@@ -68,16 +70,17 @@ class ADBShell:
         self.send(f'input swipe {x1} {y1} {x2} {y2} {duration}')
 
     def reconnect(self):
-        try:
-            self.proc.kill()
-        except Exception:
-            pass
-        self.proc = subprocess.Popen(
-            ['adb', 'shell'],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
+        with self._lock:
+            try:
+                self.proc.kill()
+            except Exception:
+                pass
+            self.proc = subprocess.Popen(
+                ['adb', 'shell'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
 
     def close(self):
         try:
@@ -121,7 +124,7 @@ def connect(ip_port):
     return result.stdout.strip()
 
 
-def run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
+def start_hotkey_listener(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
     try:
         from pynput import keyboard
     except ImportError:
@@ -145,39 +148,18 @@ def run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
         print(label, flush=True)
 
     hotkeys = {
-        '<ctrl>+<alt>+<up>':   lambda: do(cx, swipe_top,    cx,      swipe_bottom, '[scroll-prev]'),
-        '<ctrl>+<alt>+<down>': lambda: do(cx, swipe_bottom, cx,      swipe_top,    '[scroll-next]'),
-        '<ctrl>+<alt>+<right>':     lambda: do(x_left,  cy, x_right, cy,                '[swipe-right]'),
-        '<ctrl>+<alt>+<left>':      lambda: do(x_right, cy, x_left,  cy,                '[swipe-left]'),
-        '<ctrl>+<alt>+p':           lambda: key(26, '[power]'),
-        '<ctrl>+<alt>+]':           lambda: key(24, '[vol+]'),
-        '<ctrl>+<alt>+[':           lambda: key(25, '[vol-]'),
+        '<ctrl>+<alt>+<up>':    lambda: do(cx, swipe_top,    cx,      swipe_bottom, '[scroll-prev]'),
+        '<ctrl>+<alt>+<down>':  lambda: do(cx, swipe_bottom, cx,      swipe_top,    '[scroll-next]'),
+        '<ctrl>+<alt>+<left>':  lambda: do(x_left,  cy, x_right, cy,                '[swipe-right]'),
+        '<ctrl>+<alt>+<right>': lambda: do(x_right, cy, x_left,  cy,                '[swipe-left]'),
+        '<ctrl>+<alt>+p':       lambda: key(26, '[power]'),
+        '<ctrl>+<alt>+]':       lambda: key(24, '[vol+]'),
+        '<ctrl>+<alt>+[':       lambda: key(25, '[vol-]'),
     }
-
-    print("Hotkey mode — fires from any window:")
-    print("  Ctrl+Alt+PageUp    scroll prev")
-    print("  Ctrl+Alt+PageDown  scroll next")
-    print("  Ctrl+Alt+←         swipe left")
-    print("  Ctrl+Alt+→         swipe right")
-    print("  Ctrl+Alt+P         power toggle")
-    print("  Ctrl+Alt+]         volume up")
-    print("  Ctrl+Alt+[         volume down")
-    print("Quit: Ctrl+C\n")
-    print("--- listening globally ---")
-
-    stop = threading.Event()
-
-    def _stop(signum, frame):
-        stop.set()
-
-    signal.signal(signal.SIGINT, _stop)
-    signal.signal(signal.SIGTERM, _stop)
 
     listener = keyboard.GlobalHotKeys(hotkeys)
     listener.start()
-    stop.wait()
-    listener.stop()
-    listener.join()
+    return listener
 
 
 def main():
@@ -205,26 +187,21 @@ def main():
     swipe_left   = int(w * 0.20)
     swipe_right  = int(w * 0.80)
     print(f"Screen: {w}x{h} — vertical swipe y={swipe_top}↔{swipe_bottom}, horizontal x={swipe_left}↔{swipe_right}")
+    print("↑/↓ = scroll  ← → = swipe  Quit: Ctrl+C")
     if hotkey_mode:
-        pass  # run_hotkey_mode prints its own header
-    else:
-        print("↑ = scroll up (prev)  ↓ = scroll down (next)  ← → = swipe left/right")
-        print("Quit: Ctrl+C\n")
-        print("--- sending to phone ---")
+        print("  Ctrl+Alt+↑/↓   scroll prev/next (any window)")
+        print("  Ctrl+Alt+←/→   swipe left/right (any window)")
+        print("  Ctrl+Alt+P     power toggle")
+        print("  Ctrl+Alt+]/[   volume up/down")
+    print()
 
     shell = ADBShell()
+    listener = None
 
     if hotkey_mode:
-        try:
-            run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, swipe_left, swipe_right)
-        finally:
-            shell.close()
-            if plain_args:
-                subprocess.run(['adb', 'disconnect', plain_args[0]], capture_output=True)
-                print(f"\nADB disconnected from {plain_args[0]}.")
-            print("Disconnected.")
-        return
+        listener = start_hotkey_listener(shell, cx, cy, swipe_top, swipe_bottom, swipe_left, swipe_right)
 
+    print("--- sending to phone ---")
     stdout_fd = sys.stdout.fileno()
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -245,10 +222,10 @@ def main():
                 os.write(stdout_fd, b'[scroll-next]')
             elif key == '\x1b[C': # Arrow Right → swipe right
                 shell.swipe(swipe_right, cy, swipe_left, cy)
-                os.write(stdout_fd, b'[swipe-left]')
+                os.write(stdout_fd, b'[swipe-right]')
             elif key == '\x1b[D': # Arrow Left → swipe left
                 shell.swipe(swipe_left, cy, swipe_right, cy)
-                os.write(stdout_fd, b'[swipe-right]')
+                os.write(stdout_fd, b'[swipe-left]')
             elif key in KEYEVENT:
                 shell.keyevent(KEYEVENT[key])
                 label = KEY_LABEL.get(key, key)
@@ -263,7 +240,13 @@ def main():
         sys.exit(1)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        if listener:
+            listener.stop()
+            listener.join()
         shell.close()
+        if plain_args:
+            subprocess.run(['adb', 'disconnect', plain_args[0]], capture_output=True)
+            print(f"\nADB disconnected from {plain_args[0]}.")
         print("\n\nDisconnected.")
 
 

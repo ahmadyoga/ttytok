@@ -67,6 +67,18 @@ class ADBShell:
     def swipe(self, x1, y1, x2, y2, duration=SWIPE_DURATION_MS):
         self.send(f'input swipe {x1} {y1} {x2} {y2} {duration}')
 
+    def reconnect(self):
+        try:
+            self.proc.kill()
+        except Exception:
+            pass
+        self.proc = subprocess.Popen(
+            ['adb', 'shell'],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
     def close(self):
         try:
             self.proc.stdin.close()
@@ -117,21 +129,39 @@ def run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
         sys.exit(1)
 
     def do(x1, y1, x2, y2, label):
-        shell.swipe(x1, y1, x2, y2)
+        try:
+            shell.swipe(x1, y1, x2, y2)
+        except RuntimeError:
+            shell.reconnect()
+            shell.swipe(x1, y1, x2, y2)
+        print(label, flush=True)
+
+    def key(code, label):
+        try:
+            shell.keyevent(code)
+        except RuntimeError:
+            shell.reconnect()
+            shell.keyevent(code)
         print(label, flush=True)
 
     hotkeys = {
         '<ctrl>+<alt>+<up>':   lambda: do(cx, swipe_top,    cx,      swipe_bottom, '[scroll-prev]'),
         '<ctrl>+<alt>+<down>': lambda: do(cx, swipe_bottom, cx,      swipe_top,    '[scroll-next]'),
-        '<ctrl>+<alt>+<shift>+<right>':     lambda: do(x_left,  cy, x_right, cy,                '[swipe-right]'),
-        '<ctrl>+<alt>+<shift>+<left>':      lambda: do(x_right, cy, x_left,  cy,                '[swipe-left]'),
+        '<ctrl>+<alt>+<right>':     lambda: do(x_left,  cy, x_right, cy,                '[swipe-right]'),
+        '<ctrl>+<alt>+<left>':      lambda: do(x_right, cy, x_left,  cy,                '[swipe-left]'),
+        '<ctrl>+<alt>+p':           lambda: key(26, '[power]'),
+        '<ctrl>+<alt>+]':           lambda: key(24, '[vol+]'),
+        '<ctrl>+<alt>+[':           lambda: key(25, '[vol-]'),
     }
 
     print("Hotkey mode — fires from any window:")
     print("  Ctrl+Alt+PageUp    scroll prev")
     print("  Ctrl+Alt+PageDown  scroll next")
-    print("  Ctrl+Alt+Shift+←         swipe left")
-    print("  Ctrl+Alt+Shift+→         swipe right")
+    print("  Ctrl+Alt+←         swipe left")
+    print("  Ctrl+Alt+→         swipe right")
+    print("  Ctrl+Alt+P         power toggle")
+    print("  Ctrl+Alt+]         volume up")
+    print("  Ctrl+Alt+[         volume down")
     print("Quit: Ctrl+C\n")
     print("--- listening globally ---")
 

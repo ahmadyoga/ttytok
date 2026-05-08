@@ -11,6 +11,8 @@ import subprocess
 import os
 import select
 import re
+import signal
+import threading
 
 KEYEVENT = {
     '\r':     66,   # Enter
@@ -119,25 +121,33 @@ def run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
         print(label, flush=True)
 
     hotkeys = {
-        '<ctrl>+<shift>+<up>':    lambda: do(cx, swipe_top,  cx,      swipe_bottom, '[scroll-prev]'),
-        '<ctrl>+<shift>+<down>':  lambda: do(cx, swipe_bottom, cx,    swipe_top,    '[scroll-next]'),
-        '<ctrl>+<shift>+<right>': lambda: do(x_left,  cy, x_right, cy,              '[swipe-right]'),
-        '<ctrl>+<shift>+<left>':  lambda: do(x_right, cy, x_left,  cy,              '[swipe-left]'),
+        '<ctrl>+<alt>+<up>':   lambda: do(cx, swipe_top,    cx,      swipe_bottom, '[scroll-prev]'),
+        '<ctrl>+<alt>+<down>': lambda: do(cx, swipe_bottom, cx,      swipe_top,    '[scroll-next]'),
+        '<ctrl>+<alt>+<shift>+<right>':     lambda: do(x_left,  cy, x_right, cy,                '[swipe-right]'),
+        '<ctrl>+<alt>+<shift>+<left>':      lambda: do(x_right, cy, x_left,  cy,                '[swipe-left]'),
     }
 
     print("Hotkey mode — fires from any window:")
-    print("  Ctrl+Shift+↑  scroll prev")
-    print("  Ctrl+Shift+↓  scroll next")
-    print("  Ctrl+Shift+←  swipe left")
-    print("  Ctrl+Shift+→  swipe right")
+    print("  Ctrl+Alt+PageUp    scroll prev")
+    print("  Ctrl+Alt+PageDown  scroll next")
+    print("  Ctrl+Alt+Shift+←         swipe left")
+    print("  Ctrl+Alt+Shift+→         swipe right")
     print("Quit: Ctrl+C\n")
     print("--- listening globally ---")
 
-    try:
-        with keyboard.GlobalHotKeys(hotkeys) as h:
-            h.join()
-    except KeyboardInterrupt:
-        pass
+    stop = threading.Event()
+
+    def _stop(signum, frame):
+        stop.set()
+
+    signal.signal(signal.SIGINT, _stop)
+    signal.signal(signal.SIGTERM, _stop)
+
+    listener = keyboard.GlobalHotKeys(hotkeys)
+    listener.start()
+    stop.wait()
+    listener.stop()
+    listener.join()
 
 
 def main():
@@ -179,7 +189,10 @@ def main():
             run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, swipe_left, swipe_right)
         finally:
             shell.close()
-            print("\nDisconnected.")
+            if plain_args:
+                subprocess.run(['adb', 'disconnect', plain_args[0]], capture_output=True)
+                print(f"\nADB disconnected from {plain_args[0]}.")
+            print("Disconnected.")
         return
 
     stdout_fd = sys.stdout.fileno()

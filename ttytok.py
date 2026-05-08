@@ -107,9 +107,45 @@ def connect(ip_port):
     return result.stdout.strip()
 
 
+def run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_right):
+    try:
+        from pynput import keyboard
+    except ImportError:
+        print("Missing dependency: pip install pynput")
+        sys.exit(1)
+
+    def do(x1, y1, x2, y2, label):
+        shell.swipe(x1, y1, x2, y2)
+        print(label, flush=True)
+
+    hotkeys = {
+        '<ctrl>+<shift>+<up>':    lambda: do(cx, swipe_top,  cx,      swipe_bottom, '[scroll-prev]'),
+        '<ctrl>+<shift>+<down>':  lambda: do(cx, swipe_bottom, cx,    swipe_top,    '[scroll-next]'),
+        '<ctrl>+<shift>+<right>': lambda: do(x_left,  cy, x_right, cy,              '[swipe-right]'),
+        '<ctrl>+<shift>+<left>':  lambda: do(x_right, cy, x_left,  cy,              '[swipe-left]'),
+    }
+
+    print("Hotkey mode — fires from any window:")
+    print("  Ctrl+Shift+↑  scroll prev")
+    print("  Ctrl+Shift+↓  scroll next")
+    print("  Ctrl+Shift+←  swipe left")
+    print("  Ctrl+Shift+→  swipe right")
+    print("Quit: Ctrl+C\n")
+    print("--- listening globally ---")
+
+    try:
+        with keyboard.GlobalHotKeys(hotkeys) as h:
+            h.join()
+    except KeyboardInterrupt:
+        pass
+
+
 def main():
-    if len(sys.argv) > 1:
-        ip_port = sys.argv[1]
+    hotkey_mode = '--enable-hotkey' in sys.argv
+    plain_args = [a for a in sys.argv[1:] if a != '--enable-hotkey']
+
+    if plain_args:
+        ip_port = plain_args[0]
         print(f"Connecting to {ip_port}...")
         print(connect(ip_port))
 
@@ -129,13 +165,24 @@ def main():
     swipe_left   = int(w * 0.20)
     swipe_right  = int(w * 0.80)
     print(f"Screen: {w}x{h} — vertical swipe y={swipe_top}↔{swipe_bottom}, horizontal x={swipe_left}↔{swipe_right}")
-    print("↑ = scroll up (prev)  ↓ = scroll down (next)  ← → = swipe left/right")
-    print("Quit: Ctrl+C\n")
-    print("--- sending to phone ---")
+    if hotkey_mode:
+        pass  # run_hotkey_mode prints its own header
+    else:
+        print("↑ = scroll up (prev)  ↓ = scroll down (next)  ← → = swipe left/right")
+        print("Quit: Ctrl+C\n")
+        print("--- sending to phone ---")
 
     shell = ADBShell()
-    stdout_fd = sys.stdout.fileno()
 
+    if hotkey_mode:
+        try:
+            run_hotkey_mode(shell, cx, cy, swipe_top, swipe_bottom, swipe_left, swipe_right)
+        finally:
+            shell.close()
+            print("\nDisconnected.")
+        return
+
+    stdout_fd = sys.stdout.fileno()
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
 

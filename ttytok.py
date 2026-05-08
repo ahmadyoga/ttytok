@@ -20,17 +20,16 @@ KEYEVENT = {
     '\x1b':   111,  # Escape
     '\t':     61,   # Tab
     ' ':      62,   # Space
-    '\x1b[C': 22,   # Arrow Right
-    '\x1b[D': 21,   # Arrow Left
 }
 
 KEY_LABEL = {
-    '\x1b[A': '↑ swipe', '\x1b[B': '↓ swipe', '\x1b[C': '→', '\x1b[D': '←',
+    '\x1b[A': '↑ swipe', '\x1b[B': '↓ swipe',
+    '\x1b[C': '→ swipe', '\x1b[D': '← swipe',
     '\r': 'Enter', '\n': 'Enter', '\x7f': 'Backspace', '\x08': 'Backspace',
     '\x1b': 'Esc', '\t': 'Tab', ' ': 'Space',
 }
 
-SWIPE_DURATION_MS = 250
+SWIPE_DURATION_MS = 80
 
 
 class ADBShell:
@@ -124,10 +123,13 @@ def main():
 
     w, h = get_screen_size()
     cx = w // 2
-    swipe_top    = int(h * 0.25)
-    swipe_bottom = int(h * 0.75)
-    print(f"Screen: {w}x{h} — swipe range y={swipe_top}↔{swipe_bottom}")
-    print("↑ = scroll up (prev)  ↓ = scroll down (next)  ← → = keyevent")
+    cy = int(h * 0.40)
+    swipe_top    = int(h * 0.30)
+    swipe_bottom = int(h * 0.65)
+    swipe_left   = int(w * 0.20)
+    swipe_right  = int(w * 0.80)
+    print(f"Screen: {w}x{h} — vertical swipe y={swipe_top}↔{swipe_bottom}, horizontal x={swipe_left}↔{swipe_right}")
+    print("↑ = scroll up (prev)  ↓ = scroll down (next)  ← → = swipe left/right")
     print("Quit: Ctrl+C\n")
     print("--- sending to phone ---")
 
@@ -151,6 +153,12 @@ def main():
             elif key == '\x1b[B': # Arrow Down → swipe up (scroll to next)
                 shell.swipe(cx, swipe_bottom, cx, swipe_top)
                 os.write(stdout_fd, b'[scroll-next]')
+            elif key == '\x1b[C': # Arrow Right → swipe right
+                shell.swipe(swipe_right, cy, swipe_left, cy)
+                os.write(stdout_fd, b'[swipe-left]')
+            elif key == '\x1b[D': # Arrow Left → swipe left
+                shell.swipe(swipe_left, cy, swipe_right, cy)
+                os.write(stdout_fd, b'[swipe-right]')
             elif key in KEYEVENT:
                 shell.keyevent(KEYEVENT[key])
                 label = KEY_LABEL.get(key, key)

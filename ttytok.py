@@ -37,10 +37,18 @@ SWIPE_DURATION_MS = 80
 class ADBShell:
     """Persistent adb shell — one process, no spawn overhead per keypress."""
 
-    def __init__(self):
+    def __init__(self, device=None):
         self._lock = threading.Lock()
+        self.device = device
+        self._start_shell()
+
+    def _start_shell(self):
+        cmd = ['adb']
+        if self.device:
+            cmd.extend(['-s', self.device])
+        cmd.append('shell')
         self.proc = subprocess.Popen(
-            ['adb', 'shell'],
+            cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -75,12 +83,10 @@ class ADBShell:
                 self.proc.kill()
             except Exception:
                 pass
-            self.proc = subprocess.Popen(
-                ['adb', 'shell'],
-                stdin=subprocess.PIPE,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # Ensure device is still connected before restarting shell
+            if self.device:
+                subprocess.run(['adb', 'connect', self.device], capture_output=True, timeout=5)
+            self._start_shell()
 
     def close(self):
         try:
@@ -195,7 +201,7 @@ def main():
         print("  Ctrl+Alt+]/[   volume up/down")
     print()
 
-    shell = ADBShell()
+    shell = ADBShell(devices[0])
     listener = None
 
     if hotkey_mode:
@@ -214,29 +220,34 @@ def main():
             if key == '\x03':  # Ctrl+C
                 break
 
-            if key == '\x1b[A':   # Arrow Up → swipe down (scroll to previous)
-                shell.swipe(cx, swipe_top, cx, swipe_bottom)
-                os.write(stdout_fd, b'[scroll-prev]')
-            elif key == '\x1b[B': # Arrow Down → swipe up (scroll to next)
-                shell.swipe(cx, swipe_bottom, cx, swipe_top)
-                os.write(stdout_fd, b'[scroll-next]')
-            elif key == '\x1b[C': # Arrow Right → swipe right
-                shell.swipe(swipe_right, cy, swipe_left, cy)
-                os.write(stdout_fd, b'[swipe-right]')
-            elif key == '\x1b[D': # Arrow Left → swipe left
-                shell.swipe(swipe_left, cy, swipe_right, cy)
-                os.write(stdout_fd, b'[swipe-left]')
-            elif key in KEYEVENT:
-                shell.keyevent(KEYEVENT[key])
-                label = KEY_LABEL.get(key, key)
-                os.write(stdout_fd, f'[{label}]'.encode())
-            elif len(key) == 1 and key.isprintable():
-                shell.text(key)
-                os.write(stdout_fd, key.encode())
+            try:
+                if key == '\x1b[A':   # Arrow Up → swipe down (scroll to previous)
+                    shell.swipe(cx, swipe_top, cx, swipe_bottom)
+                    os.write(stdout_fd, b'[scroll-prev]')
+                elif key == '\x1b[B': # Arrow Down → swipe up (scroll to next)
+                    shell.swipe(cx, swipe_bottom, cx, swipe_top)
+                    os.write(stdout_fd, b'[scroll-next]')
+                elif key == '\x1b[C': # Arrow Right → swipe right
+                    shell.swipe(swipe_right, cy, swipe_left, cy)
+                    os.write(stdout_fd, b'[swipe-right]')
+                elif key == '\x1b[D': # Arrow Left → swipe left
+                    shell.swipe(swipe_left, cy, swipe_right, cy)
+                    os.write(stdout_fd, b'[swipe-left]')
+                elif key in KEYEVENT:
+                    shell.keyevent(KEYEVENT[key])
+                    label = KEY_LABEL.get(key, key)
+                    os.write(stdout_fd, f'[{label}]'.encode())
+                elif len(key) == 1 and key.isprintable():
+                    shell.text(key)
+                    os.write(stdout_fd, key.encode())
+            except RuntimeError as e:
+                print(f"\nError: {e}", file=sys.stderr)
+                shell.reconnect()
+                print("Reconnected to ADB shell.", file=sys.stderr)
 
     except RuntimeError as e:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-        print(f"\nError: {e}")
+        print(f"\nFatal Error: {e}")
         sys.exit(1)
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)

@@ -161,6 +161,7 @@ def start_hotkey_listener(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_righ
         '<ctrl>+<alt>+p':       lambda: key(26, '[power]'),
         '<ctrl>+<alt>+]':       lambda: key(24, '[vol+]'),
         '<ctrl>+<alt>+[':       lambda: key(25, '[vol-]'),
+        '<ctrl>+<alt>+<space>': lambda: key(62, '[space]'),
     }
 
     listener = keyboard.GlobalHotKeys(hotkeys)
@@ -199,6 +200,7 @@ def main():
         print("  Ctrl+Alt+←/→   swipe left/right (any window)")
         print("  Ctrl+Alt+P     power toggle")
         print("  Ctrl+Alt+]/[   volume up/down")
+        print("  Ctrl+Alt+Space space key")
     print()
 
     shell = ADBShell(devices[0])

@@ -77,6 +77,9 @@ class ADBShell:
     def swipe(self, x1, y1, x2, y2, duration=SWIPE_DURATION_MS):
         self.send(f'input swipe {x1} {y1} {x2} {y2} {duration}')
 
+    def launch_app(self, package_name):
+        self.send(f'monkey -p {package_name} -c android.intent.category.LAUNCHER 1')
+
     def reconnect(self):
         with self._lock:
             try:
@@ -153,6 +156,14 @@ def start_hotkey_listener(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_righ
             shell.keyevent(code)
         print(label, flush=True)
 
+    def app(package_name, label):
+        try:
+            shell.launch_app(package_name)
+        except RuntimeError:
+            shell.reconnect()
+            shell.launch_app(package_name)
+        print(label, flush=True)
+
     hotkeys = {
         '<ctrl>+<alt>+<up>':    lambda: do(cx, swipe_top,    cx,      swipe_bottom, '[scroll-prev]'),
         '<ctrl>+<alt>+<down>':  lambda: do(cx, swipe_bottom, cx,      swipe_top,    '[scroll-next]'),
@@ -162,6 +173,8 @@ def start_hotkey_listener(shell, cx, cy, swipe_top, swipe_bottom, x_left, x_righ
         '<ctrl>+<alt>+]':       lambda: key(24, '[vol+]'),
         '<ctrl>+<alt>+[':       lambda: key(25, '[vol-]'),
         '<ctrl>+<alt>+<space>': lambda: key(62, '[space]'),
+        '<ctrl>+<alt>+t':       lambda: app('com.ss.android.ugc.trill', '[tiktok]'),
+        '<ctrl>+<alt>+i':       lambda: app('com.instagram.android', '[instagram]'),
     }
 
     listener = keyboard.GlobalHotKeys(hotkeys)
@@ -201,6 +214,8 @@ def main():
         print("  Ctrl+Alt+P     power toggle")
         print("  Ctrl+Alt+]/[   volume up/down")
         print("  Ctrl+Alt+Space space key")
+        print("  Ctrl+Alt+T     open TikTok")
+        print("  Ctrl+Alt+I     open Instagram")
     print()
 
     shell = ADBShell(devices[0])
